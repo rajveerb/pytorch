@@ -848,6 +848,11 @@ def configure_extension_build():
             # braces warnings, see
             # https://bugs.llvm.org/show_bug.cgi?id=21629
             '-Wno-missing-braces',
+            # added by Rajveer
+            '-fno-omit-frame-pointer',
+            '-g',
+            '-O0',
+            '-mno-omit-leaf-frame-pointer',
         ]
 
     library_dirs.append(lib_path)
