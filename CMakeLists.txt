@@ -799,7 +799,7 @@ endif()
 
 # ---[ Build flags
 if(NOT MSVC)
-  string(APPEND CMAKE_CXX_FLAGS " -O2 -fPIC")
+  string(APPEND CMAKE_CXX_FLAGS " -O0 -g -fPIC")
   # Eigen fails to build with some versions, so convert this to a warning
   # Details at http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1459
   string(APPEND CMAKE_CXX_FLAGS " -Wall")
@@ -914,6 +914,8 @@ if(NOT MSVC)
   append_cxx_flag_if_supported("-fno-trapping-math" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=format" CMAKE_CXX_FLAGS)
   append_cxx_flag_if_supported("-Werror=cast-function-type" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fno-omit-frame-pointer" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-mno-omit-leaf-frame-pointer" CMAKE_CXX_FLAGS)
 endif()
 
 if(USE_ASAN)
