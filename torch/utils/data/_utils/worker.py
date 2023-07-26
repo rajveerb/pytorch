@@ -245,13 +245,20 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         init_exception = None
         
-        import psutil
-        # get current CPU affinity
-        p = psutil.Process()
-        initial_affinity = p.cpu_affinity()
-        # set new affinity
-        p.cpu_affinity([initial_affinity[(len(initial_affinity)+worker_id) % num_workers]])
-        p.nice(-20)
+        pin_core = int(os.environ.get('TORCH_DATALOADER_PIN_CORE', 0))
+
+        if pin_core:
+            
+            import psutil
+            # get current CPU affinity
+            p = psutil.Process()
+            initial_affinity = p.cpu_affinity()
+            # set new affinity
+            p.cpu_affinity([initial_affinity[(len(initial_affinity)+worker_id) % num_workers]])
+            priority = int(os.environ.get('TORCH_DATALOADER_PRIORITY', 0))
+            # -20 is the highest priority
+            p.nice(priority)
+
 
         try:
             if init_fn is not None:
