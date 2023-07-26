@@ -244,6 +244,14 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         from torch.utils.data import _DatasetKind
 
         init_exception = None
+        
+        import psutil
+        # get current CPU affinity
+        p = psutil.Process()
+        initial_affinity = p.cpu_affinity()
+        # set new affinity
+        p.cpu_affinity([initial_affinity[(len(initial_affinity)+worker_id) % num_workers]])
+        p.nice(-20)
 
         try:
             if init_fn is not None:
