@@ -184,6 +184,7 @@ Other potentially useful environment variables may be found in `setup.py`.
 **Common**
 
 ```bash
+# @Rajveer, create a new conda env first
 conda install cmake ninja
 # Run this command from the PyTorch directory after cloning the source code using the “Get the PyTorch Source“ section below
 pip install -r requirements.txt
@@ -192,6 +193,7 @@ pip install -r requirements.txt
 **On Linux**
 
 ```bash
+# @Rajveer, use the new conda env
 conda install mkl mkl-include
 # CUDA only: Add LAPACK support for the GPU if needed
 conda install -c pytorch magma-cuda110  # or the magma-cuda* that matches your CUDA version from https://anaconda.org/pytorch/repo
@@ -217,6 +219,7 @@ conda install -c conda-forge libuv=1.39
 
 #### Get the PyTorch Source
 ```bash
+# @Rajveer, use the new conda env
 git clone --recursive https://github.com/pytorch/pytorch
 cd pytorch
 # if you are updating an existing checkout
@@ -235,8 +238,11 @@ python tools/amd_build/build_amd.py
 
 Install PyTorch
 ```bash
+# @Rajveer, use the new conda env
 export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 python setup.py develop
+# @Rajveer, use below command to use if its installed
+conda list
 ```
 
 > _Aside:_ If you are using [Anaconda](https://www.anaconda.com/distribution/#download-section), you may experience an error caused by the linker:
