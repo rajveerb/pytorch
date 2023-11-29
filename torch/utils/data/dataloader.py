@@ -1348,10 +1348,19 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return self._process_data(data)
 
             assert not self._shutdown and self._tasks_outstanding > 0
+
+            # Code to log waiting time for a specific batch
+            if self.log_check:
+                import time
+                start_wait = time.time_ns()
+
             idx, data = self._get_data()
 
             if self.log_check:
                 end_wait = time.time_ns()
+                with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                    f.write(f'SBatchWait_{idx},{start_wait},{end_wait-start_wait}\n')
+            
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
                 # Check for _IterableDatasetStopIteration
@@ -1370,10 +1379,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 if self.log_check:
                     with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
                         f.write(f'SBatchWait_{idx},{end_wait},1000\n') # 1000 is us a placeholder
+                # print('OOO')
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
             else:
                 del self._task_info[idx]
+                # print('2')
                 if self.log_check:
                     import time
                     with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
@@ -1401,7 +1412,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         else:
             # not found (i.e., didn't break)
             return
-
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
         if self.log_check:
             import time

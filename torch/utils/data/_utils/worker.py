@@ -331,7 +331,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 init_exception = None
             else:
                 try:
-
+                    
                     if log_check:
                         start = time.time_ns()
                     data = fetcher.fetch(index)
@@ -341,7 +341,6 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                         with open(dataset.log_file+f"_worker_pid_{pid}", "a") as f:
                             f.write(f"SBatchPreprocessed_{idx},{start},{duration}\n")
 
-                    data = fetcher.fetch(index)
                 except Exception as e:
                     if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
                         data = _IterableDatasetStopIteration(worker_id)

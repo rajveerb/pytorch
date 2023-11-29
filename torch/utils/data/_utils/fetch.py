@@ -56,6 +56,7 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
         else:
             data = self.dataset[possibly_batched_index]
 
+        
         if self.dataset.log_file:
             start = time.time_ns()
 
