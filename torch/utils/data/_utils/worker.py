@@ -245,6 +245,20 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
 
         init_exception = None
 
+        pin_core = int(os.environ.get('TORCH_DATALOADER_PIN_CORE', 0))
+
+        if pin_core:
+
+            import psutil
+            # get current CPU affinity
+            p = psutil.Process()
+            initial_affinity = p.cpu_affinity()
+            # set new affinity
+            p.cpu_affinity([initial_affinity[(len(initial_affinity)+worker_id) % num_workers]])
+            priority = int(os.environ.get('TORCH_DATALOADER_PRIORITY', 0))
+            # -20 is the highest priority
+            p.nice(priority)
+
         try:
             if init_fn is not None:
                 init_fn(worker_id)
@@ -269,6 +283,18 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         iteration_end = False
 
         watchdog = ManagerWatchdog()
+
+        import time,psutil
+
+        # get process id using psutil
+        pid = psutil.Process().pid
+
+        log_check = False
+        # if dataset object has attribute log_file
+        if hasattr(dataset, "log_file"):
+            # write to log file
+            if dataset.log_file is not None:
+                log_check = True
 
         while watchdog.is_alive():
             try:
@@ -305,7 +331,16 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                 init_exception = None
             else:
                 try:
+                    
+                    if log_check:
+                        start = time.time_ns()
                     data = fetcher.fetch(index)
+                    if log_check:
+                        duration = time.time_ns() - start
+                        # write to log file
+                        with open(dataset.log_file+f"_worker_pid_{pid}", "a") as f:
+                            f.write(f"SBatchPreprocessed_{idx},{start},{duration}\n")
+
                 except Exception as e:
                     if isinstance(e, StopIteration) and dataset_kind == _DatasetKind.Iterable:
                         data = _IterableDatasetStopIteration(worker_id)
