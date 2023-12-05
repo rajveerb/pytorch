@@ -45,8 +45,27 @@ class _MapDatasetFetcher(_BaseDatasetFetcher):
         super(_MapDatasetFetcher, self).__init__(dataset, auto_collation, collate_fn, drop_last)
 
     def fetch(self, possibly_batched_index):
+        if self.dataset.log_file:
+            import time,psutil
+            log = ""
+            pid = psutil.Process().pid
+
         if self.auto_collation:
             data = [self.dataset[idx] for idx in possibly_batched_index]
         else:
             data = self.dataset[possibly_batched_index]
-        return self.collate_fn(data)
+                
+        if self.dataset.log_file:
+            start = time.time_ns()
+
+        collated_data = self.collate_fn(data)
+
+        if self.dataset.log_file:
+            end = time.time_ns()
+            # end_batch = time.time_ns()
+            log += f"SCollation,{start},{end-start}\n"
+            # log += f"All transform + collation batch time:{end_batch-start_batch} ns\n"
+            # log += f"Batch size:{len(data)}\n"
+            open(self.dataset.log_file+f'_worker_pid_{pid}', "a").write(log)
+
+        return collated_data

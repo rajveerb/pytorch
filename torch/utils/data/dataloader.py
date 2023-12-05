@@ -893,6 +893,17 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
 
+        import psutil
+        # get id of current process
+        self.pid = psutil.Process().pid
+
+        self.log_check = False
+        # if dataset object has attribute log_file
+        if hasattr(self._dataset, "log_file"):
+            # write to log file
+            if self._dataset.log_file is not None:
+                self.log_check = True
+        
         self._index_queues = []
         self._workers = []
         for i in range(self._num_workers):
@@ -1180,10 +1191,33 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             # Check if the next sample has already been generated
             if len(self._task_info[self._rcvd_idx]) == 2:
                 data = self._task_info.pop(self._rcvd_idx)[1]
-                return self._process_data(data)
+                if self.log_check:
+                    import time
+                    with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                        # 1 microsec below is just a placeholder 
+                        # capture self._rcvd_idx before it gets incremented in self._process_data
+                        batch_id = self._rcvd_idx
+                        _data = self._process_data(data)
+                        f.write(f'SBatchConsumed_{batch_id},{time.time_ns()},1000\n')
+                        return _data
+                else:
+                    return self._process_data(data)
 
             assert not self._shutdown and self._tasks_outstanding > 0
+
+
+            # Code to log waiting time for a specific batch
+            if self.log_check:
+                import time
+                start_wait = time.time_ns()
+
             idx, data = self._get_data()
+
+            if self.log_check:
+                end_wait = time.time_ns()
+                with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                    f.write(f'SBatchWait_{idx},{start_wait},{end_wait-start_wait}\n')
+
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
                 # Check for _IterableDatasetStopIteration
@@ -1200,7 +1234,18 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._task_info[idx] += (data,)
             else:
                 del self._task_info[idx]
-                return self._process_data(data)
+                
+                if self.log_check:
+                    import time
+                    with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                        # capture self._rcvd_idx before it gets incremented in self._process_data
+                        batch_id = self._rcvd_idx
+                        _data = self._process_data(data)
+                        # 1 microsec below is just a placeholder 
+                        f.write(f'SBatchConsumed_{batch_id},{time.time_ns()},1000\n')
+                        return _data
+                else:
+                    return self._process_data(data)
 
     def _try_put_index(self):
         assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
@@ -1218,6 +1263,12 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             return
 
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
+        
+        if self.log_check:
+            import time
+            with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                f.write(f'SBatchQueued_{self._send_idx},{time.time_ns()},1000\n')
+        
         self._task_info[self._send_idx] = (worker_queue_idx,)
         self._tasks_outstanding += 1
         self._send_idx += 1
