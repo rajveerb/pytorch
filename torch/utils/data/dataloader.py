@@ -1349,17 +1349,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             assert not self._shutdown and self._tasks_outstanding > 0
 
-            # Code to log waiting time for a specific batch
-            if self.log_check:
-                import time
-                start_wait = time.time_ns()
-
             idx, data = self._get_data()
 
             if self.log_check:
                 end_wait = time.time_ns()
-                with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
-                    f.write(f'SBatchWait_{idx},{start_wait},{end_wait-start_wait}\n')
             
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -1384,7 +1377,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                 self._task_info[idx] += (data,)
             else:
                 del self._task_info[idx]
-                # print('2')
+
                 if self.log_check:
                     import time
                     with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
