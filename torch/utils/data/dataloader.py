@@ -1305,6 +1305,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return data
 
     def _next_data(self):
+        # Code to log waiting time for a specific batch
+        if self.log_check:
+            import time
+            start_wait = time.time_ns()
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -1345,17 +1349,10 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             assert not self._shutdown and self._tasks_outstanding > 0
 
-            # Code to log waiting time for a specific batch
-            if self.log_check:
-                import time
-                start_wait = time.time_ns()
-
             idx, data = self._get_data()
 
             if self.log_check:
                 end_wait = time.time_ns()
-                with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
-                    f.write(f'SBatchWait_{idx},{start_wait},{end_wait-start_wait}\n')
             
             self._tasks_outstanding -= 1
             if self._dataset_kind == _DatasetKind.Iterable:
@@ -1369,18 +1366,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     continue
 
             if idx != self._rcvd_idx:
-                # print('OOO')
+                # A later batch finished first
+                # It will have no wait time when it is processed in the future
+                # So we mark it as a batch with almost no wait time
+                if self.log_check:
+                    with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
+                        f.write(f'SBatchWait_{idx},{end_wait},1000\n') # 1000 is us a placeholder
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
             else:
                 del self._task_info[idx]
-                # print('2')
+
                 if self.log_check:
                     import time
                     with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
                         # capture self._rcvd_idx before it gets incremented in self._process_data
                         batch_id = self._rcvd_idx
                         _data = self._process_data(data)
+                        f.write(f'SBatchWait_{batch_id},{start_wait},{end_wait-start_wait}\n')
                         # 1 microsec below is just a placeholder 
                         f.write(f'SBatchConsumed_{batch_id},{time.time_ns()},1000\n')
                         return _data
