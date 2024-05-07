@@ -1367,6 +1367,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             if idx != self._rcvd_idx:
                 # A later batch finished first
+                print("SHOULD NOT BE HERE")
                 # It will have no wait time when it is processed in the future
                 # So we mark it as a batch with almost no wait time
                 if self.log_check:

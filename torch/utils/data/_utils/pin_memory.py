@@ -23,7 +23,10 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
     elif device == "xpu":
         torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
 
+    rcv_index = 0
+
     def do_one_step():
+        nonlocal rcv_index
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
         except queue.Empty:
@@ -35,7 +38,9 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device):
             except Exception:
                 data = ExceptionWrapper(
                     where="in pin memory thread for device {}".format(device_id))
-            r = (idx, data)
+            r = (rcv_index, data)
+            rcv_index += 1
+            # r = (idx, data)
         while not done_event.is_set():
             try:
                 out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
