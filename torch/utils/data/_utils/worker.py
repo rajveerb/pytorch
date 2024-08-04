@@ -332,7 +332,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
             else:
                 try:
 
-                     if log_check:
+                    if log_check:
                         start = time.time_ns()
                     data = fetcher.fetch(index)
                     if log_check:
