@@ -13,7 +13,7 @@ from . import MP_STATUS_CHECK_INTERVAL
 from torch._utils import ExceptionWrapper
 
 
-def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device, log_file=None, pid=None):
+def _pin_memory_loop(in_queue, out_queue, curr_index, processed_data, data_done, device_id, done_event, device):
     # This setting is thread local, and prevents the copy in pin_memory from
     # consuming all CPU cores.
     torch.set_num_threads(1)
@@ -23,45 +23,53 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device, log_fil
     elif device == "xpu":
         torch.xpu.set_device(device_id)  # type: ignore[attr-defined]
 
-    rcv_index = 0
-    pid = pid if pid is not None else 0
-    if log_file:
-        import psutil
-        pid = psutil.Process().pid
+    # Create a priority queue to keep track of out of order data in order
+    out_of_order = queue.PriorityQueue()
+
     def do_one_step():
-        nonlocal rcv_index
-        try:
-            r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
-        except queue.Empty:
-            return
+        r = None
+        # Check if the next data in priority queue is the right one
+        if not done_event.is_set():
+            try:
+                r = out_of_order.get(block=False)
+                if r[0] != curr_index.value and not data_done.value:
+                    processed_data.value += 1
+                    out_of_order.put(r)
+                    try:
+                        r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                    except queue.Empty:
+                        print("Wasted 5 secs - 1")
+                        return
+            except queue.Empty:
+                try:
+                    r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+                except queue.Empty:
+                    print("Wasted 5 secs - 2")
+                    return
+            if r is not None and r[0] != curr_index.value and not data_done.value:
+                processed_data.value += 1
+                out_of_order.put(r)
+                return
+
         idx, data = r
+        # if not done_event.is_set() and idx != curr_index.value:
+        #     # Add the data back to out_of_orde queue, since we want to pin
+        #     # the data in the original order
+        #     out_of_order.put((idx, data))
+        #     return
         if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
             try:
-                if log_file:
-                    # print(f"pin_memory: {idx}")
-                    import time
-                    start = time.time_ns()
                 data = pin_memory(data, device)
-                if log_file:
-                    import time
-                    end = time.time_ns()
-                    import psutil
-                    with open(log_file+f"_main_pid_{pid}", "a") as f:
-                        # f.write(f"{idx} {end - start}\n")
-                        f.write(f'SBatchPinMemory_{idx},{start},{end-start}\n')
-                    # print(f"pin_memory: {idx} - {end - start}")
-
             except Exception:
                 data = ExceptionWrapper(
                     where="in pin memory thread for device {}".format(device_id))
-            # r = (rcv_index, data)
-            # rcv_index += 1
             r = (idx, data)
         while not done_event.is_set():
             try:
                 out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
                 break
             except queue.Full:
+                print("Wasted 5 secs - 3")
                 continue
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
@@ -74,7 +82,7 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device, log_fil
 def pin_memory(data, device=None):
     if isinstance(data, torch.Tensor):
         return data.pin_memory(device)
-    elif isinstance(data, (str, bytes)):
+    elif isinstance(data, str):
         return data
     elif isinstance(data, collections.abc.Mapping):
         try:

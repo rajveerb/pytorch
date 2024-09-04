@@ -1,0 +1,31 @@
+#!/bin/bash
+#SBATCH -J imagenet_profiler    
+#SBATCH -N 1                          
+#SBATCH -c 40                               
+#SBATCH -t 04:00:00                  
+#SBATCH --gres=gpu:V100:1          
+ 
+date
+# exec zsh
+echo "----------------------------------------------------------------------------------------------------"
+lscpu
+echo "----------------------------------------------------------------------------------------------------"
+nvidia-smi
+echo "----------------------------------------------------------------------------------------------------"
+module load anaconda3/2022.05.0.1
+echo "anaconda loaded"
+conda activate ml-profiling
+echo "conda activated"
+module load cuda/12.1.1
+echo "cuda loaded"
+date
+# bash run_torch_profiler.sh
+# bash ml-pipeline-benchmark/scripts/cloudlab/pytorch_custom_log_imagenet_gpu4_256.sh
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+# rm -rf build
+export CFLAGS+=" -Wno-error -w"
+export CXXFLAGS+=" -Wno-error -w"
+python setup.py develop
+cd ../vision
+rm -rf build
+python setup.py develop
