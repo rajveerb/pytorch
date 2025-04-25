@@ -7,6 +7,7 @@ static methods.
 
 import collections
 import queue
+import heapq
 
 import torch
 from . import MP_STATUS_CHECK_INTERVAL
@@ -28,41 +29,45 @@ def _pin_memory_loop(in_queue, out_queue, device_id, done_event, device, log_fil
     if log_file:
         import psutil
         pid = psutil.Process().pid
+
+    priority_heap = []
+
     def do_one_step():
         nonlocal rcv_index
         try:
             r = in_queue.get(timeout=MP_STATUS_CHECK_INTERVAL)
+            idx, data = r
+            heapq.heappush(priority_heap, (idx, data))
         except queue.Empty:
-            return
-        idx, data = r
-        if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
-            try:
-                if log_file:
-                    # print(f"pin_memory: {idx}")
-                    import time
-                    start = time.time_ns()
-                data = pin_memory(data, device)
-                if log_file:
-                    import time
-                    end = time.time_ns()
-                    import psutil
-                    with open(log_file+f"_main_pid_{pid}", "a") as f:
-                        # f.write(f"{idx} {end - start}\n")
-                        f.write(f'SBatchPinMemory_{idx},{start},{end-start}\n')
-                    # print(f"pin_memory: {idx} - {end - start}")
+            pass  # No new batch in the input queue
 
-            except Exception:
-                data = ExceptionWrapper(
-                    where="in pin memory thread for device {}".format(device_id))
-            # r = (rcv_index, data)
-            # rcv_index += 1
-            r = (idx, data)
-        while not done_event.is_set():
-            try:
-                out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
-                break
-            except queue.Full:
-                continue
+        # Try to process the batch with the lowest ID (highest priority)
+        if priority_heap:
+            idx, data = heapq.heappop(priority_heap)
+            if not done_event.is_set() and not isinstance(data, ExceptionWrapper):
+                try:
+                    if log_file:
+                        import time
+                        start = time.time_ns()
+                    data = pin_memory(data, device)
+                    if log_file:
+                        import time
+                        end = time.time_ns()
+                        import psutil
+                        with open(log_file+f"_main_pid_{pid}", "a") as f:
+                            f.write(f'SBatchPinMemory_{idx},{start},{end-start}\n')
+                except Exception:
+                    data = ExceptionWrapper(
+                        where="in pin memory thread for device {}".format(device_id))
+                r = (idx, data)
+            else:
+                r = (idx, data)
+            while not done_event.is_set():
+                try:
+                    out_queue.put(r, timeout=MP_STATUS_CHECK_INTERVAL)
+                    break
+                except queue.Full:
+                    continue
 
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
