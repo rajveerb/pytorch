@@ -1013,6 +1013,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+        self._worker_free_queue = multiprocessing_context.Queue()
         self._worker_pids_set = False
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
@@ -1040,7 +1041,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
-                      self._persistent_workers, self._shared_seed))
+                      self._persistent_workers, self._shared_seed, self._worker_free_queue))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -1051,25 +1052,22 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             w.start()
             self._index_queues.append(index_queue)
             self._workers.append(w)
+            self._worker_free_queue.put(i)
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
 
             # Queue is not type-annotated
             self._data_queue = queue.Queue()  # type: ignore[var-annotated]
-            self._current_recv_index = multiprocessing_context.Value('i', 0)
-            self._processed_data = multiprocessing_context.Value('i', 0)
-            self._data_done = multiprocessing_context.Value('i', 0)
-            self._local_processed_data = 0
             if self._pin_memory_device == "xpu":
                 current_device = torch.xpu.current_device()  # type: ignore[attr-defined]
             else:
                 current_device = torch.cuda.current_device()  # choose cuda for default
             pin_memory_thread = threading.Thread(
                 target=_utils.pin_memory._pin_memory_loop,
-                args=(self._worker_result_queue, self._data_queue, self._current_recv_index, self._processed_data, self._data_done,
+                args=(self._worker_result_queue, self._data_queue,
                       current_device,
-                      self._pin_memory_thread_done_event, self._pin_memory_device))
+                      self._pin_memory_thread_done_event, self._pin_memory_device, self._dataset.log_file, self.pid))
             pin_memory_thread.daemon = True
             pin_memory_thread.start()
             # Similar to workers (see comment above), we only register
@@ -1293,7 +1291,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             else:
                 raise RuntimeError('DataLoader timed out after {} seconds'.format(self._timeout))
         elif self._pin_memory:
-            self._current_recv_index.value = self._rcvd_idx
             while self._pin_memory_thread.is_alive():
                 success, data = self._try_get_data()
                 if success:
@@ -1314,11 +1311,6 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
         if self.log_check:
             import time
             start_wait = time.time_ns()
-        
-        while self._local_processed_data < self._processed_data.value:
-            self._try_put_index()
-            self._local_processed_data += 1
-
         while True:
             # If the worker responsible for `self._rcvd_idx` has already ended
             # and was unable to fulfill this task (due to exhausting an `IterableDataset`),
@@ -1377,14 +1369,13 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
             if idx != self._rcvd_idx:
                 # A later batch finished first
-                # Print id and recv_idx to log file
-                print(f"idx: {idx}, rcvd_idx: {self._rcvd_idx}")
-                    
+                # print("SHOULD NOT BE HERE")
                 # It will have no wait time when it is processed in the future
                 # So we mark it as a batch with almost no wait time
                 if self.log_check:
                     with open(self._dataset.log_file+f"_main_pid_{self.pid}", 'a') as f:
                         f.write(f'SBatchWait_{idx},{end_wait},1000\n') # 1000 is us a placeholder
+                # print('OOO')
                 # store out-of-order samples
                 self._task_info[idx] += (data,)
             else:
@@ -1404,22 +1395,24 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                     return self._process_data(data)
 
     def _try_put_index(self):
-        # assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
-        # if self._tasks_outstanding < self._prefetch_factor * self._num_workers:
-        #     return
+        assert self._tasks_outstanding < self._prefetch_factor * self._num_workers
 
         try:
             index = self._next_index()
         except StopIteration:
-            self._data_done.value = 1
             return
-        for _ in range(self._num_workers):  # find the next active worker, if any
-            worker_queue_idx = next(self._worker_queue_idx_cycle)
-            if self._workers_status[worker_queue_idx]:
-                break
+
+        if self._worker_free_queue.empty():
+            for _ in range(self._num_workers):  # find the next active worker, if any
+                worker_queue_idx = next(self._worker_queue_idx_cycle)
+                if self._workers_status[worker_queue_idx]:
+                    break
+            else:
+                # not found (i.e., didn't break)
+                return
         else:
-            # not found (i.e., didn't break)
-            return
+            worker_queue_idx = self._worker_free_queue.get()
+
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
         if self.log_check:
             import time

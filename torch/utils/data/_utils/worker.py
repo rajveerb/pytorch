@@ -207,7 +207,7 @@ def _generate_state(base_seed, worker_id):
 
 def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                  auto_collation, collate_fn, drop_last, base_seed, init_fn, worker_id,
-                 num_workers, persistent_workers, shared_seed):
+                 num_workers, persistent_workers, shared_seed, free_queue=None):
     # See NOTE [ Data Loader Multiprocessing Shutdown Logic ] for details on the
     # logic of this function.
 
@@ -354,6 +354,7 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
                         # See NOTE [ Python Traceback Reference Cycle Problem ]
                         data = ExceptionWrapper(
                             where="in DataLoader worker process {}".format(worker_id))
+            free_queue.put(worker_id)
             data_queue.put((idx, data))
             del data, idx, index, r  # save memory
     except KeyboardInterrupt:

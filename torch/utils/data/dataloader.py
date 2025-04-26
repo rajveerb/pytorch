@@ -1013,6 +1013,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
         # No certainty which module multiprocessing_context is
         self._worker_result_queue = multiprocessing_context.Queue()  # type: ignore[var-annotated]
+        self._worker_free_queue = multiprocessing_context.Queue()
         self._worker_pids_set = False
         self._shutdown = False
         self._workers_done_event = multiprocessing_context.Event()
@@ -1040,7 +1041,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
                       self._worker_result_queue, self._workers_done_event,
                       self._auto_collation, self._collate_fn, self._drop_last,
                       self._base_seed, self._worker_init_fn, i, self._num_workers,
-                      self._persistent_workers, self._shared_seed))
+                      self._persistent_workers, self._shared_seed, self._worker_free_queue))
             w.daemon = True
             # NB: Process.start() actually take some time as it needs to
             #     start a process and pass the arguments over via a pipe.
@@ -1051,6 +1052,7 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             w.start()
             self._index_queues.append(index_queue)
             self._workers.append(w)
+            self._worker_free_queue.put(i)
 
         if self._pin_memory:
             self._pin_memory_thread_done_event = threading.Event()
@@ -1399,13 +1401,19 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
             index = self._next_index()
         except StopIteration:
             return
-        for _ in range(self._num_workers):  # find the next active worker, if any
-            worker_queue_idx = next(self._worker_queue_idx_cycle)
-            if self._workers_status[worker_queue_idx]:
-                break
+
+        if self._worker_free_queue.empty():
+            # need the loop for prefetch_factor to be effective
+            for _ in range(self._num_workers):  # find the next active worker, if any
+                worker_queue_idx = next(self._worker_queue_idx_cycle)
+                if self._workers_status[worker_queue_idx]:
+                    break
+            else:
+                # not found (i.e., didn't break)
+                return
         else:
-            # not found (i.e., didn't break)
-            return
+            worker_queue_idx = self._worker_free_queue.get()
+
         self._index_queues[worker_queue_idx].put((self._send_idx, index))
         if self.log_check:
             import time
@@ -1417,7 +1425,8 @@ class _MultiProcessingDataLoaderIter(_BaseDataLoaderIter):
 
     def _process_data(self, data):
         self._rcvd_idx += 1
-        self._try_put_index()
+        while self._tasks_outstanding < self._prefetch_factor * self._num_workers:
+            self._try_put_index()
         if isinstance(data, ExceptionWrapper):
             data.reraise()
         return data
